@@ -1,0 +1,296 @@
+#!/bin/bash
+
+#
+# vital-backup - backup absolutely key data to multiple destinations
+# 
+
+# Read targets to backup to from this file
+CONFIG_FILE=$HOME/bin/vital-backup-config.txt
+
+# Tar parameters to create an archive. Specify compression type, or not, here
+# create, verbose, Sparse, compress (bzip2), a new file..
+CONFIG_TAR_PARAMETERS="cvSf"
+
+# Match the extension to your tar parameters: .tar, .tgz, .tbz, etc.
+CONFIG_FILE_EXT="tar"
+
+# When not used, make this "." to separate other fields
+CONFIG_FILE_TAG=".usbstore."
+
+# Default count of sources and targets to zero, define an array for each
+SOURCES=0
+SOURCE_LIST=()
+SOURCE_TAR_LIST=""
+TARGETS=0
+TARGET_DIR=()
+TARGET_NAME=()
+
+#
+# Command line processing
+#
+
+CLI_TARGET_NAME=${1:-"null"}
+
+if [[ $CLI_TARGET_NAME == "null" ]]
+then
+  echo "Backing up to all targets"
+  ALL_TARGETS=true
+else
+  echo "Backing up to one target"
+  ALL_TARGETS=false
+  CLI_TARGET_NAME_VALID=false
+fi
+
+# specify config file
+# debugging on
+# quiet operation, no reporting 
+# add directories
+# add targets
+# tar, cp or rsync
+# include hour in datestamp, or not
+
+function clean_trailing_input_line {
+  # Truncate anything fields that follow our source directory
+  TRUNC_SPACE=$(expr index "$INPUT_LINE" " ")
+  if [[ $TRUNC_SPACE -gt 0 ]]
+  then
+    TRUNC_SPACE=$((TRUNC_SPACE-1))
+    INPUT_LINE=${INPUT_LINE:0:$TRUNC_SPACE}
+    #echo "Truncated Space $INPUT_LINE"
+  fi
+
+  # Truncate any comments on the right side of our source directory
+  TRUNC_HASH=$(expr index "$INPUT_LINE" "#")
+  if [[ $TRUNC_HASH -gt 0 ]]
+  then
+    TRUNC_HASH=$((TRUNC_HASH-1))
+    INPUT_LINE=${INPUT_LINE:0:$TRUNC_HASH}
+    #echo "Truncated Hash $INPUT_LINE"
+  fi
+}
+
+# Check for access to config file
+if [[ ! -r $CONFIG_FILE ]]
+then
+  echo "Error: I can't read from $CONFIG_FILE"
+  exit 1
+fi
+
+# Read each line of the config file
+while read INPUT_LINE
+do
+  # If the line is NOT a comment, treat it as a target
+  if [[ ${INPUT_LINE:0:1} != "#" ]]
+  then
+
+    # process a destination target for this backup
+    if [[ ${INPUT_LINE:0:6} == "source" ]]
+    then
+
+      # Truncate "target " from the front of the line
+      INPUT_LINE=${INPUT_LINE:7}
+
+      # Remove extra fields or comments form our input line
+      clean_trailing_input_line
+
+      # If the source exists, add it to our list of targets
+      if [[ -d $INPUT_LINE ]]
+      then
+        # Append this source to our array of sources
+        SOURCES=$((SOURCES+1))
+        SOURCE_LIST[$SOURCES]="$SOURCE_LIST $INPUT_LINE"
+
+        # Append this directory to a single string listing all sources for tar
+        SOURCE_TAR_LIST="$SOURCE_TAR_LIST $INPUT_LINE"
+      else
+        if [[ ! -r $INPUT_LINE ]]
+        then
+          echo "WARNING: Source $INPUT_LINE is not accessible."
+        else
+          echo "WARNING: Source $INPUT_LINE does not exist."
+        fi
+      fi
+    fi
+
+    # Process a destination target for this backup
+    if [[ ${INPUT_LINE:0:6} == "target" ]]
+    then
+
+      # Truncate "target " from the front of the line
+      INPUT_LINE=${INPUT_LINE:7}
+
+      # Capture the name of this target by finding the space between name & tgt
+      SPACE_POS=$(expr index "$INPUT_LINE" " "})
+      if [[ $SPACE_POS -gt 0 ]]
+      then
+        # Capture just the target
+        TARGET_NAME_END=$((SPACE_POS-1))
+        TARGET_NAME_STRING=${INPUT_LINE:0:TARGET_NAME_END}
+
+        # Prune input so it's 
+        INPUT_LINE=${INPUT_LINE:SPACE_POS}
+      fi
+
+      # Remove extra fields or comments form our input line
+      clean_trailing_input_line
+
+      # If the target exists, add it to our list of targets
+      if [[ -d $INPUT_LINE ]]
+      then
+        TARGETS=$((TARGETS+1))
+
+        # Append the target destination to its array TARGETS=$((TARGETS+1))
+        TARGET_DIR[$TARGETS]="$TARGET_DIR $INPUT_LINE"
+
+        # Append the target name to its array
+        TARGET_NAME[$TARGETS]="$TARGET_NAME $TARGET_NAME_STRING"
+
+        if [[ $TARGET_NAME_STRING == $CLI_TARGET_NAME ]]
+        then
+          CLI_TARGET_VALID=true
+        fi
+      else
+        if [[ ! -r $INPUT_LINE ]]
+        then
+          echo "WARNING: Target $INPUT_LINE is not accessible."
+        else
+          echo "WARNING: Target $INPUT_LINE does not exist."
+        fi
+      fi
+    fi
+
+  fi
+done < $CONFIG_FILE
+
+# Bail out if we have no sources
+if [[ $SOURCES == 0 ]]
+then
+	echo "Error: There are no backup sources available."
+	exit 1
+fi
+
+# Bail out if we have no targets
+if [[ $TARGETS == 0 ]]
+then
+	echo "Error: There are no backup targets available."
+	exit 1
+fi
+
+# Bail out if the user requested a target name we can't find
+if [[ $CLI_TARGET_VALID == false ]]
+then
+  echo "Error: There is no target configured as $CLI_TARGET_NAME"
+  exit 1
+fi
+
+echo
+echo "Backing up $SOURCES sources:"
+for SOURCE_IDX in $(seq 1 $SOURCES)
+do
+  # Capture human readable size
+  DU_HUMAN=$(du -sh ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+  # Report it in column 1 right-justified
+  printf "%10s" $DU_HUMAN
+  # Report name of source in column 2, left-justified, no size
+  echo "${SOURCE_LIST[$SOURCE_IDX]}"
+
+  # Capture size of source in bytes
+  DU_BYTES=$(du -sb ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+
+  # Add size of source to total sources size by bytes
+  TOTAL_DU_BYTES=$((TOTAL_DU_BYTES+DU_BYTES))
+done
+
+# Provide a total
+if [[ $TOTAL_DU_BYTES -gt 0 ]]
+then
+
+  # Use the non-floating point values to decide what to report
+  TOTAL_DU_KB=$(($TOTAL_DU_BYTES/1024))
+  TOTAL_DU_MB=$((TOTAL_DU_BYTES/1048576))
+  TOTAL_DU_GB=$((TOTAL_DU_BYTES/1073741824))
+
+  # Use bc to calculate floating point values
+  TOTAL_DU_KB_FP=$(echo "scale=2; $TOTAL_DU_BYTES / 1024" | bc )
+  TOTAL_DU_MB_FP=$(echo "scale=2; $TOTAL_DU_BYTES / 1048576" | bc )
+  TOTAL_DU_GB_FP=$(echo "scale=2; $TOTAL_DU_BYTES / 1073741824" | bc)
+
+  printf "%10s\n" "-----"
+
+  # If we have values for
+
+  if [[ $TOTAL_DU_GB -gt 0 ]]
+  then
+    printf "%10s" $TOTAL_DU_GB_FP
+    echo " Gigabytes TOTAL"
+  elif [[ $TOTAL_DU_MB -gt 0 ]]
+  then
+    printf "%10s" $TOTAL_DU_MB_FP
+    echo " Megabytes TOTAL"
+  elif [[ $TOTAL_DU_KB -gt 0 ]]
+  then  
+    printf "%10s" $TOTAL_DU_KB_FP
+    echo " Kilobytes TOTAL"
+  elif [[ $TOTAL_DU_MB -gt 0 ]]
+  then
+    printf "%10s" $TOTAL_DU_BYTES
+    echo " Bytes TOTAL"
+  fi
+
+fi
+
+echo
+
+if [[ $ALL_TARGETS == true ]]
+then
+  echo "Writing to $TARGETS targets:"
+  for TARGET_IDX in $(seq 1 $TARGETS)
+  do
+    echo "${TARGET_DIR[$TARGET_IDX]}"
+  done
+else
+  echo "Writing to target $CLI_TARGET_NAME only."
+fi
+
+echo
+
+#DATETIME=$(date +%Y-%m%d-%H%M)
+DATETIME=$(date +%Y-%m%d)
+
+function backup_to_tar {
+    time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $SOURCE_TAR_LIST
+}
+
+# Process each memory stick one at a time
+for TARGET_IDX in $(seq 1 $TARGETS)
+do
+
+# Legacy, remove it?
+#	# Copy each source file to target
+#	for IDX in $(seq 1 $FILE_LIST_COUNT)
+#	do
+#		TARGET_STRING=${SOURCE_LIST[$IDX]}
+#		TARGET_STRING=${TARGET_STRING//\//-}
+#		TARGET_STRING=${TARGET_STRING:1}
+#		TARGET_STRING=$DATETIME.${TARGET_STRING}
+#  cp source target..
+# done
+
+  # Remove the leading space from this target array's name
+  THIS_TARGET_NAME=${TARGET_NAME[$TARGET_IDX]:1}
+
+  # Perform our backupt if we're writing to all targets or 
+  # or this is our selected one
+  if [[ ALL_TARGETS == true || ${THIS_TARGET_NAME} == $CLI_TARGET_NAME ]]
+  then
+
+    TARGET_STRING=${TARGET_DIR[$TARGET_IDX]}/host-${HOSTNAME}.by-user-${USER}.${DATETIME}${CONFIG_FILE_TAG}${CONFIG_FILE_EXT}
+
+    #time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $SOURCE_TAR_LIST
+
+    backup_to_tar
+
+    echo
+  fi
+
+done
