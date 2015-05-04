@@ -1,0 +1,31 @@
+#
+# vital-backup config file
+#
+
+# User: maxhome
+source /home/maxhome/Documents        # Maxwell's documents
+source /home/maxhome/.ssh             # SSH keys
+source /home/maxhome/.password-store  # PASS keys
+source /home/maxhome/.config          # KeepassX files
+source /home/maxhome/.purple          # Chat logs
+
+# User: maxwell
+source /home/maxwell/Documents
+source /home/maxwell/.ssh
+source /home/maxwell/.password-store
+source /home/maxwell/.config
+source /home/maxwell/.purple
+
+# System files:
+source /etc                # System config files (WAP keys!)
+source /usr/local/bin      # Local system scripts
+source /usr/local/etc      # Local system config files
+source /root               # Root files
+
+# Destinations
+target vault1 /run/media/maxhome/ToshiVault1        # USB Key Vault 1
+target vault2 /run/media/maxhome/ToshiVault2        # USB Key Vault 2
+target filer /net/filer_general/backups/toshi-usb   # NAS server 1
+target aux /net/aux_general/backups/toshi-usb       # NAS server 2
+target secure1024 /mnt/secure1024/backups/toshi-usb # USB HD 1
+target secure500 /mnt/secure500/backups/toshi-usb   # USB HD 2
