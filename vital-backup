@@ -281,7 +281,7 @@ do
 
   # Perform our backupt if we're writing to all targets or 
   # or this is our selected one
-  if [[ ALL_TARGETS == true || ${THIS_TARGET_NAME} == $CLI_TARGET_NAME ]]
+  if [[ $ALL_TARGETS == true || ${THIS_TARGET_NAME} == $CLI_TARGET_NAME ]]
   then
 
     TARGET_STRING=${TARGET_DIR[$TARGET_IDX]}/host-${HOSTNAME}.by-user-${USER}.${DATETIME}${CONFIG_FILE_TAG}${CONFIG_FILE_EXT}
