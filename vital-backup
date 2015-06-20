@@ -21,6 +21,11 @@ CONFIG_FILE_TAG=".usbstore."
 SOURCES=0
 SOURCE_LIST=()
 SOURCE_TAR_LIST=""
+
+EXCLUDES=0
+EXCLUDE_LIST=()
+EXCLUDE_TAR_LIST=""
+
 TARGETS=0
 TARGET_DIR=()
 TARGET_NAME=()
@@ -83,7 +88,7 @@ do
   if [[ ${INPUT_LINE:0:1} != "#" ]]
   then
 
-    # process a destination target for this backup
+    # process a source to be backed up
     if [[ ${INPUT_LINE:0:6} == "source" ]]
     then
 
@@ -94,7 +99,7 @@ do
       clean_trailing_input_line
 
       # If the source exists, add it to our list of targets
-      if [[ -d $INPUT_LINE ]]
+      if [[ -a $INPUT_LINE ]]
       then
         # Append this source to our array of sources
         SOURCES=$((SOURCES+1))
@@ -110,6 +115,24 @@ do
           echo "WARNING: Source $INPUT_LINE does not exist."
         fi
       fi
+    fi
+
+    # Exclude an object from the filesystem
+    if [[ ${INPUT_LINE:0:7} == "exclude" ]]
+    then
+
+      # Truncate "exclude " from the front of the line
+      INPUT_LINE=${INPUT_LINE:8}
+
+      # Remove extra fields or comments form our input line
+      clean_trailing_input_line
+
+      # Append this source to our array of sources
+      EXCLUDES=$((EXCLUDES+1))
+      EXCLUDE_LIST[$EXCLUDES]="$EXCLUDE_LIST $INPUT_LINE"
+
+      # Append this directory to a single string listing all sources for tar
+      EXCLUDE_TAR_LIST="$EXCLUDE_TAR_LIST --exclude $INPUT_LINE"
     fi
 
     # Process a destination target for this backup
@@ -241,6 +264,17 @@ fi
 
 echo
 
+if [[ $EXCLUDES -gt 0 ]]
+then
+  echo "Excluding these $EXCLUDES objects:"
+  for EXCLUDE_IDX in $(seq 1 $EXCLUDES)
+  do
+    echo "${EXCLUDE_LIST[$EXCLUDE_IDX]}"
+  done
+fi
+
+echo
+
 if [[ $ALL_TARGETS == true ]]
 then
   echo "Writing to $TARGETS targets:"
@@ -253,28 +287,22 @@ else
 fi
 
 echo
+read -p "Ready ?" YESNO
+if [[ $YESNO != "y" && $YESNO != "Y" && $YESNO != "yes" ]]
+then
+  exit 0
+fi
 
-#DATETIME=$(date +%Y-%m%d-%H%M)
 DATETIME=$(date +%Y-%m%d)
 
 function backup_to_tar {
-    time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $SOURCE_TAR_LIST
+echo    time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $EXCLUDE_TAR_LIST $SOURCE_TAR_LIST
+  time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $EXCLUDE_TAR_LIST $SOURCE_TAR_LIST
 }
 
 # Process each memory stick one at a time
 for TARGET_IDX in $(seq 1 $TARGETS)
 do
-
-# Legacy, remove it?
-#	# Copy each source file to target
-#	for IDX in $(seq 1 $FILE_LIST_COUNT)
-#	do
-#		TARGET_STRING=${SOURCE_LIST[$IDX]}
-#		TARGET_STRING=${TARGET_STRING//\//-}
-#		TARGET_STRING=${TARGET_STRING:1}
-#		TARGET_STRING=$DATETIME.${TARGET_STRING}
-#  cp source target..
-# done
 
   # Remove the leading space from this target array's name
   THIS_TARGET_NAME=${TARGET_NAME[$TARGET_IDX]:1}
@@ -285,8 +313,6 @@ do
   then
 
     TARGET_STRING=${TARGET_DIR[$TARGET_IDX]}/host-${HOSTNAME}.by-user-${USER}.${DATETIME}${CONFIG_FILE_TAG}${CONFIG_FILE_EXT}
-
-    #time tar $CONFIG_TAR_PARAMETERS ${TARGET_STRING} $SOURCE_TAR_LIST
 
     backup_to_tar
 
