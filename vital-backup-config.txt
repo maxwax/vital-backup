@@ -22,6 +22,9 @@ source /usr/local/bin      # Local system scripts
 source /usr/local/etc      # Local system config files
 source /root               # Root files
 
+exclude /home/maxhome/.local/Trash
+exclude /home/maxwell/.local/Trash
+
 # Destinations
 target vault1 /run/media/maxhome/ToshiVault1        # USB Key Vault 1
 target vault2 /run/media/maxhome/ToshiVault2        # USB Key Vault 2
