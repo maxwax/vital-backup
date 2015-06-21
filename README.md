@@ -11,6 +11,7 @@ To use:
 
 * Modify the config file to define one or more "source" directories you wish to backup
 * Modify the config file to define one or more "target" mount points where you wish to archive data
+* Modify the config file to define one or more "exclude" objects which should be skipped
 
 #### Syntax
 
