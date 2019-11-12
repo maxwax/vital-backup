@@ -4,7 +4,7 @@
 # vital-backup - backup absolutely key data to multiple destinations
 # 
 
-VERSION="2015.0807.01"
+VERSION="2019.1111.01"
 
 # Read targets to backup to from this file
 CONFIG_FILE=$HOME/.vital-backup.conf
@@ -25,6 +25,10 @@ CONFIG_FILE_TAG="vital-backup."
 
 BACKUP_TO_ALL_TARGETS=true
 
+# Log rsync or tar backups to this target
+LOG_DIR=~/logs
+LOG_FILE=${LOG_DIR}/vital-backup.log
+
 # Default count of sources and targets to zero, define an array for each
 SOURCES=0
 SOURCE_LIST=()
@@ -32,7 +36,8 @@ SOURCE_DIR_STRING=""
 
 EXCLUDES=0
 EXCLUDE_LIST=()
-EXCLUDE_DIR_STRING=""
+TAR_EXCLUDE_DIR_STRING=""
+RSYNC_EXCLUDE_DIR_STRING=""
 
 TARGETS=0
 TARGET_DIR=()
@@ -46,6 +51,27 @@ CHECK_SKIPS=false
 #
 # Functions
 #
+
+function echo_log {
+  echo $1 | tee -a "${LOG_FILE}"
+}
+
+# Ensure we have a log directory in the user's home directory
+function check_log_dir {
+  if [[ ! -d "${LOG_DIR}" ]]
+  then
+    mkdir "${LOG_DIR}"
+  fi
+
+  # Attempt to write to it, check result and bail if error
+  touch "${LOG_FILE}"
+  RESULT=$?
+  if [[ $RESULT -gt 0 ]]
+  then
+    echo "Error: Cannot write to log file $LOG_FILE"
+    exit 1
+  fi
+}
 
 function only_target {
   echo "Backing up to one target"
@@ -129,10 +155,6 @@ function clean_trailing_input_line {
 
 function add_target {
 
-  echo "DEBUG add_target() $1"
-  echo "DEBUG add_target() $2"
-  echo "DEBUG add_target() $3"
-  
   # Increment the number of targets
   TARGETS=$((TARGETS+1))
 
@@ -144,52 +166,6 @@ function add_target {
 
   # The method of backing up data to this target
   TARGET_METHOD+=("$3")
-}
-
-#
-# Copy data via tar to a storage device
-#
-
-function backup_via_tar {
-
-set -x
-  echo "PERFORMING TAR BACKUP to ${TARGET_STRING}"
-
-  TARGET_STRING="${TARGET_DIR[$TARGET_IDX]}/${CONFIG_FILE_TAG}host-${HOSTNAME}-${USER}-${DATETIME}${CONFIG_TAR_EXT}"
-
-  echo tar $CONFIG_TAR_PARAMETERS $EXCLUDE_DIR_STRING -f ${TARGET_STRING} $SOURCE_DIR_STRING
-
-  tar $CONFIG_TAR_PARAMETERS $EXCLUDE_DIR_STRING -f ${TARGET_STRING} $SOURCE_DIR_STRING
-  echo "Completed attempt to tar to ${TARGET_STRING}"
-set +x
-}
-
-#
-# Copy data via rsync to a storage device
-#
-
-function backup_via_rsync {
-  echo "PERFORMING RSYNC BACKUP to ${TARGET_STRING}"
-
-  TARGET_STRING="${TARGET_DIR[$TARGET_IDX]}/${CONFIG_FILE_TAG}${HOSTNAME}-${USER}.${DATETIME}${CONFIG_RSYNC_EXT}"
-
-  # Create the target string directory on the target and write data into it
-  mkdir -p "${TARGET_STRING}"
-
-  # Verify we were able to write data to the target directory 
-  RESULT=$?
-  if [[ $RESULT != 0 ]]
-  then
-    echo "Error: Can't make target directory ${TARGET_STRING}"
-    exit 1
-  else
-
-    echo rsync $CONFIG_RSYNC_PARAMETERS $SOURCE_DIR_STRING ${TARGET_STRING}
-    rsync $CONFIG_RSYNC_PARAMETERS $SOURCE_DIR_STRING ${TARGET_STRING}
-  fi
-
-  echo "Completed attempt to rsync to ${TARGET_STRING}"
-
 }
 
 function load_config_file {
@@ -229,7 +205,6 @@ function load_config_file {
           SOURCE_LIST+=("$INPUT_LINE")
 
           # Append this directory to a single string listing all sources for tar
-          #SOURCE_DIR_STRING="$SOURCE_DIR_STRING \"$INPUT_LINE\""
           SOURCE_DIR_STRING="$SOURCE_DIR_STRING $INPUT_LINE"
         else
           if [[ ! -r $INPUT_LINE ]]
@@ -256,11 +231,11 @@ function load_config_file {
 
         # Append this source to our array of sources
         EXCLUDES=$((EXCLUDES+1))
-        #EXCLUDE_LIST[$EXCLUDES]="$EXCLUDE_LIST $INPUT_LINE"
         EXCLUDE_LIST+=("$INPUT_LINE")
 
         # Append this directory to a single string listing all sources for tar
-        EXCLUDE_DIR_STRING="$EXCLUDE_DIR_STRING --exclude=\"$INPUT_LINE\""
+        TAR_EXCLUDE_DIR_STRING="$TAR_EXCLUDE_DIR_STRING --exclude=\"$INPUT_LINE\""
+        RSYNC_EXCLUDE_DIR_STRING="$RSYNC_EXCLUDE_DIR_STRING --exclude \"$INPUT_LINE\""
       fi
 
       # 
@@ -386,15 +361,28 @@ function report_sizes {
   SOURCES_COUNT=$((SOURCES-1))
   for SOURCE_IDX in $(seq 0 $SOURCES_COUNT)
   do
-    # Capture human readable size
-    DU_HUMAN=$(du -sh ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+
+    if [[ $TAR_EXCLUDE_DIR_STRING != "" ]]
+    then
+
+      #echo "TAR_EXCLUDE_DIR_STRING |$TAR_EXCLUDE_DIR_STRING|" 
+      du_string="du -sh $TAR_EXCLUDE_DIR_STRING ${SOURCE_LIST[$SOURCE_IDX]}"
+      DU_HUMAN=$(eval $du_string | awk '{print $1}')
+
+    else
+      DU_HUMAN=$(du -sh ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+    fi
+
     # Report it in column 1 right-justified
     printf "%10s" $DU_HUMAN
     # Report name of source in column 2, left-justified, no size
     echo " ${SOURCE_LIST[$SOURCE_IDX]}"
 
     # Capture size of source in bytes
-    DU_BYTES=$(du -sb ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+    #DU_BYTES=$(du -sb ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
+
+    du_string="du -sb $TAR_EXCLUDE_DIR_STRING ${SOURCE_LIST[$SOURCE_IDX]}"
+    DU_BYTES=$(eval $du_string | awk '{print $1}')
 
     # Add size of source to total sources size by bytes
     TOTAL_DU_BYTES=$((TOTAL_DU_BYTES+DU_BYTES))
@@ -440,10 +428,89 @@ function report_sizes {
 
 }
 
+function report_excludes {
+  if [[ $EXCLUDES -gt 0 ]]
+  then
+    echo "Excluding these $EXCLUDES objects:"
+
+    EXCLUDES_COUNT=$((EXCLUDES-1))
+    for EXCLUDE_IDX in $(seq 0 $EXCLUDES_COUNT)
+    do
+      echo "${EXCLUDE_LIST[$EXCLUDE_IDX]}"
+    done
+  fi
+
+  echo
+}
+
+function report_targets {
+  if [[ $BACKUP_TO_ALL_TARGETS == true ]]
+  then
+    echo "Writing to $TARGETS targets:"
+
+    TARGETS_COUNT=$((TARGETS-1))
+    for TARGET_IDX in $(seq 0 $TARGETS_COUNT)
+    do
+      echo "${TARGET_DIR[$TARGET_IDX]}"
+    done
+  else
+    echo "Writing to target $CLI_TARGET_NAME only."
+  fi
+}
+
+#
+# Copy data via tar to a storage device
+#
+
+function backup_via_tar {
+
+  echo "PERFORMING TAR BACKUP to ${TARGET_STRING}"
+
+  TARGET_STRING="${TARGET_DIR[$TARGET_IDX]}/${CONFIG_FILE_TAG}host-${HOSTNAME}-${USER}-${DATETIME}${CONFIG_TAR_EXT}"
+
+  if [[ $TAR_EXCLUDE_DIR_STRING != "" ]]
+  then
+
+    echo eval tar $CONFIG_TAR_PARAMETERS $TAR_EXCLUDE_DIR_STRING -f ${TARGET_STRING} $SOURCE_DIR_STRING
+    eval tar $CONFIG_TAR_PARAMETERS $TAR_EXCLUDE_DIR_STRING -f ${TARGET_STRING} $SOURCE_DIR_STRING
+  else
+    echo eval tar $CONFIG_TAR_PARAMETERS -f ${TARGET_STRING} $SOURCE_DIR_STRING
+    eval tar $CONFIG_TAR_PARAMETERS -f ${TARGET_STRING} $SOURCE_DIR_STRING
+  fi
+
+  echo "Completed attempt to tar to ${TARGET_STRING}"
+}
+
+#
+# Copy data via rsync to a storage device
+#
+
+function backup_via_rsync {
+  echo "PERFORMING RSYNC BACKUP to ${TARGET_STRING}"
+
+  TARGET_STRING="${TARGET_DIR[$TARGET_IDX]}/${CONFIG_FILE_TAG}${HOSTNAME}-${USER}.${DATETIME}${CONFIG_RSYNC_EXT}"
+
+  # Create the target string directory on the target and write data into it
+  mkdir -p "${TARGET_STRING}"
+
+  # Verify we were able to write data to the target directory 
+  RESULT=$?
+  if [[ $RESULT != 0 ]]
+  then
+    echo "Error: Can't make target directory ${TARGET_STRING}"
+    exit 1
+  else
+
+    echo eval rsync $TAR_EXCLUDE_DIR_STRING $CONFIG_RSYNC_PARAMETERS $SOURCE_DIR_STRING ${TARGET_STRING}
+    eval rsync $TAR_EXCLUDE_DIR_STRING $CONFIG_RSYNC_PARAMETERS $SOURCE_DIR_STRING ${TARGET_STRING}
+  fi
+
+  echo "Completed attempt to rsync to ${TARGET_STRING}"
+
+}
+
 #----------------------------------------------------------------------------
-#
-# Command Line Options Processing
-#
+# MAIN PROCESSING
 #----------------------------------------------------------------------------
 
 CMD_LIST=false
@@ -480,6 +547,12 @@ do
 	shift
 done
 
+# Ensure we can write to a log file
+check_log_dir
+
+# Report date, mostly for log file
+date | tee -a "${LOG_FILE}"
+
 # Load sources, excludes and targets from config file
 load_config_file
 
@@ -487,33 +560,13 @@ load_config_file
 validate_options
 
 # Report sizes of source directories and total source volume
-report_sizes 
+report_sizes | tee -a "${LOG_FILE}"
 
-if [[ $EXCLUDES -gt 0 ]]
-then
-  echo "Excluding these $EXCLUDES objects:"
+# Report directories excluded from backup
+report_excludes | tee -a "${LOG_FILE}"
 
-  EXCLUDES_COUNT=$((EXCLUDES-1))
-  for EXCLUDE_IDX in $(seq 0 $EXCLUDES_COUNT)
-  do
-    echo "${EXCLUDE_LIST[$EXCLUDE_IDX]}"
-  done
-fi
-
-echo
-
-if [[ $BACKUP_TO_ALL_TARGETS == true ]]
-then
-  echo "Writing to $TARGETS targets:"
-
-  TARGETS_COUNT=$((TARGETS-1))
-  for TARGET_IDX in $(seq 0 $TARGETS_COUNT)
-  do
-    echo "${TARGET_DIR[$TARGET_IDX]}"
-  done
-else
-  echo "Writing to target $CLI_TARGET_NAME only."
-fi
+# Report targets where backups will be saved
+report_targets | tee -a "${LOG_FILE}"
 
 read -p "Ready ?" YESNO
 if [[ $YESNO != "y" && $YESNO != "Y" && $YESNO != "yes" ]]
@@ -540,10 +593,10 @@ do
 
     case ${TARGET_METHOD[$TARGET_IDX]} in
       "tar" )
-        backup_via_tar;;
+        backup_via_tar | tee -a $LOG_FILE;;
 
       "rsync" )
-        backup_via_rsync;;
+        backup_via_rsync | tee -a $LOG_FILE;;
     esac
     
     echo
