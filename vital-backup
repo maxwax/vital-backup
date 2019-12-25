@@ -2,12 +2,14 @@
 
 #
 # vital-backup - backup absolutely key data to multiple destinations
-# 
+#
 
-VERSION="2019.1111.01"
+VERSION="1.1.0"
+VERSION_DATE="2019.1224.01"
 
-# Read targets to backup to from this file
-CONFIG_FILE=$HOME/.vital-backup.conf
+# Config file defults to a system wide instance,
+# but user can use --config to point to an alternate file
+CONFIG_FILE=/etc/vital-backup.conf
 
 # Tar parameters to create an archive. Specify compression type, or not, here
 # create, verbose, Sparse, compress (bzip2), a new file..
@@ -82,6 +84,26 @@ function only_target {
   exit 1
 }
 
+function use_config {
+  echo "Using alternate config file $1"
+
+  C_FILE=${1:-"_null"}
+  if [[ $C_FILE == "_null" ]]
+  then
+    echo "Error: You must specify a valid config file when using --config"
+    usage
+    exit 1
+  else
+    if [[ ! -r "$1" ]]
+    then
+      echo "Error: Config file $1 is not readable"
+      exit 1
+    else
+      CONFIG_FILE=$1
+    fi
+  fi
+}
+
 # Add a named target to an array of targets to skip
 function skip_target {
 
@@ -105,14 +127,14 @@ function skip_target {
 
 # specify config file
 # debugging on
-# quiet operation, no reporting 
+# quiet operation, no reporting
 # add directories
 # add targets
 # tar, cp or rsync
 # include hour in datestamp, or not
 
 function usage {
-	echo "vital-backup $VERSION"
+	echo "vital-backup $VERSION $VERSION_DATE"
 	echo
 	echo "usage: vital-backup <options>"
   echo
@@ -125,6 +147,7 @@ function usage {
   echo
   echo "    --list            Show the configuration file's contents"
   echo
+  echo "    --config <file>   Use alternate config file"
 }
 
 # Discard unwanted data on config lines
@@ -238,7 +261,7 @@ function load_config_file {
         RSYNC_EXCLUDE_DIR_STRING="$RSYNC_EXCLUDE_DIR_STRING --exclude \"$INPUT_LINE\""
       fi
 
-      # 
+      #
       # Config file: Process a destination target for this backup
       #
 
@@ -257,7 +280,7 @@ function load_config_file {
 
           TARGET_NAME_STRING=${INPUT_LINE:0:TARGET_NAME_END}
 
-          # Prune input so it's 
+          # Prune input so it's
           INPUT_LINE=${INPUT_LINE:SPACE_POS}
         fi
 
@@ -270,7 +293,7 @@ function load_config_file {
 
           TARGET_METHOD_STRING=${INPUT_LINE:0:TARGET_METHOD_END}
 
-          # Prune input so it's 
+          # Prune input so it's
           INPUT_LINE=${INPUT_LINE:SPACE_POS}
         fi
 
@@ -283,7 +306,7 @@ function load_config_file {
 
           # default to no, add this target
           SKIP_THIS=false
-   
+
           # If we have one or more skips, check them
           if [[ $SKIP_TARGETS -gt 0 ]]
           then
@@ -365,7 +388,7 @@ function report_sizes {
     if [[ $TAR_EXCLUDE_DIR_STRING != "" ]]
     then
 
-      #echo "TAR_EXCLUDE_DIR_STRING |$TAR_EXCLUDE_DIR_STRING|" 
+      #echo "TAR_EXCLUDE_DIR_STRING |$TAR_EXCLUDE_DIR_STRING|"
       du_string="du -sh $TAR_EXCLUDE_DIR_STRING ${SOURCE_LIST[$SOURCE_IDX]}"
       DU_HUMAN=$(eval $du_string | awk '{print $1}')
 
@@ -413,7 +436,7 @@ function report_sizes {
       printf "%10s" $TOTAL_DU_MB_FP
       echo " Megabytes TOTAL"
     elif [[ $TOTAL_DU_KB -gt 0 ]]
-    then  
+    then
       printf "%10s" $TOTAL_DU_KB_FP
       echo " Kilobytes TOTAL"
     elif [[ $TOTAL_DU_MB -gt 0 ]]
@@ -493,7 +516,7 @@ function backup_via_rsync {
   # Create the target string directory on the target and write data into it
   mkdir -p "${TARGET_STRING}"
 
-  # Verify we were able to write data to the target directory 
+  # Verify we were able to write data to the target directory
   RESULT=$?
   if [[ $RESULT != 0 ]]
   then
@@ -518,7 +541,7 @@ CMD_LIST=false
 while [ "$1" != "" ]
 do
 
-	case $1 in 
+	case $1 in
 
 		# enable debugging output
 		-d | --debug )
@@ -534,6 +557,10 @@ do
 		--skip)
 			shift
       skip_target $1;;
+
+    --config)
+			shift
+      use_config $1;;
 
 		-h | --help )
 		usage
@@ -584,7 +611,7 @@ do
   # Remove the leading space from this target array's name
   THIS_TARGET_NAME=${TARGET_NAME[$TARGET_IDX]:1}
 
-  # Perform our backupt if we're writing to all targets or 
+  # Perform our backupt if we're writing to all targets or
   # or this is our selected one
   if [[ $BACKUP_TO_ALL_TARGETS == true || ${THIS_TARGET_NAME} == $CLI_TARGET_NAME ]]
   then
@@ -598,7 +625,7 @@ do
       "rsync" )
         backup_via_rsync | tee -a $LOG_FILE;;
     esac
-    
+
     echo
   fi
 
