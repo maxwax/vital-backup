@@ -4,8 +4,8 @@
 # vital-backup - backup absolutely key data to multiple destinations
 #
 
-VERSION="1.1.0"
-VERSION_DATE="2019.1224.01"
+VERSION="1.2.0"
+VERSION_DATE="2020.0108.01"
 
 # Config file defults to a system wide instance,
 # but user can use --config to point to an alternate file
@@ -13,12 +13,12 @@ CONFIG_FILE=/etc/vital-backup.conf
 
 # Tar parameters to create an archive. Specify compression type, or not, here
 # create, verbose, Sparse, compress (bzip2), a new file..
-CONFIG_TAR_PARAMETERS="cvS"
+CONFIG_TAR_PARAMETERS="cS"
 
 # Match the extension to your tar parameters: .tar, .tgz, .tbz, etc.
 CONFIG_TAR_EXT=".tar"
 
-CONFIG_RSYNC_PARAMETERS="--verbose --recursive --human-readable --relative"
+CONFIG_RSYNC_PARAMETERS="--recursive --human-readable --relative"
 
 CONFIG_RSYNC_EXT=".rsync"
 
@@ -121,6 +121,13 @@ function skip_target {
   fi
 }
 
+# Add verbose parameters to tar and rysnc defaults so they show progress
+# during backup.
+function backup_verbose {
+  CONFIG_TAR_PARAMETERS="${CONFIG_TAR_PARAMETERS}v"
+  CONFIG_RSYNC_PARAMETERS="${CONFIG_RSYNC_PARAMETERS} --verbose"
+}
+
 #
 # Command line processing
 #
@@ -133,13 +140,16 @@ function skip_target {
 # tar, cp or rsync
 # include hour in datestamp, or not
 
-function usage {
+function report_version {
 	echo "vital-backup $VERSION $VERSION_DATE"
+}
+
+function usage {
+  report_version
 	echo
 	echo "usage: vital-backup <options>"
   echo
   echo "Configuration is read from ~/.vital-backup.conf"
-	echo
 	echo
   echo "    --target <target> Write to only this named target"
   echo
@@ -148,6 +158,8 @@ function usage {
   echo "    --list            Show the configuration file's contents"
   echo
   echo "    --config <file>   Use alternate config file"
+  echo
+  echo "    --verbose         Show each file as it is backed up."
 }
 
 # Discard unwanted data on config lines
@@ -474,7 +486,7 @@ function report_targets {
     TARGETS_COUNT=$((TARGETS-1))
     for TARGET_IDX in $(seq 0 $TARGETS_COUNT)
     do
-      echo "${TARGET_DIR[$TARGET_IDX]}"
+      echo "    ${TARGET_DIR[$TARGET_IDX]}"
     done
   else
     echo "Writing to target $CLI_TARGET_NAME only."
@@ -562,6 +574,10 @@ do
 			shift
       use_config $1;;
 
+    --verbose)
+			shift
+      backup_verbose;;
+
 		-h | --help )
 		usage
 		exit 0;;
@@ -578,6 +594,8 @@ done
 check_log_dir
 
 # Report date, mostly for log file
+report_version
+echo
 date | tee -a "${LOG_FILE}"
 
 # Load sources, excludes and targets from config file
@@ -595,7 +613,9 @@ report_excludes | tee -a "${LOG_FILE}"
 # Report targets where backups will be saved
 report_targets | tee -a "${LOG_FILE}"
 
-read -p "Ready ?" YESNO
+echo
+read -p "READY ?" YESNO
+echo
 if [[ $YESNO != "y" && $YESNO != "Y" && $YESNO != "yes" ]]
 then
   exit 0
@@ -616,7 +636,7 @@ do
   if [[ $BACKUP_TO_ALL_TARGETS == true || ${THIS_TARGET_NAME} == $CLI_TARGET_NAME ]]
   then
 
-    echo $TARGET_IDX ${TARGET_METHOD[$TARGET_IDX]}
+    #echo $TARGET_IDX ${TARGET_METHOD[$TARGET_IDX]}
 
     case ${TARGET_METHOD[$TARGET_IDX]} in
       "tar" )
