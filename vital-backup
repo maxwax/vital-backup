@@ -416,7 +416,7 @@ function report_sizes {
     # Capture size of source in bytes
     #DU_BYTES=$(du -sb ${SOURCE_LIST[$SOURCE_IDX]} | awk '{print $1}')
 
-    du_string="du -sb $TAR_EXCLUDE_DIR_STRING ${SOURCE_LIST[$SOURCE_IDX]}"
+    du_string="du -s -B1 $TAR_EXCLUDE_DIR_STRING ${SOURCE_LIST[$SOURCE_IDX]}"
     DU_BYTES=$(eval $du_string | awk '{print $1}')
 
     # Add size of source to total sources size by bytes
